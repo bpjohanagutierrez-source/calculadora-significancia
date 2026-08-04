@@ -9,15 +9,15 @@ st.set_page_config(page_title="Matriz de Significancia Estadística", layout="wi
 
 st.title("📊 Calculadora de Diferencias Significativas")
 st.markdown("""
-**Regla de Jerarquía:**
-* **MAYÚSCULAS (A, B...):** Diferencia significativa al **90% de confianza** ($p < 0.10$).
-* **minúsculas (a, b...):** Diferencia significativa solo al **80% de confianza** ($p < 0.20$).
+**Reglas de letras:**
+* **MAYÚSCULAS (A, B...):** Grupos al **90% de confianza** ($p < 0.10$).
+* **minúsculas (a, b...):** Grupos al **80% de confianza** ($p < 0.20$).
+* *Se eliminan letras duplicadas (ej. `A a` pasa a ser simplemente `A`).*
 """)
 
-# Casilla para el tamaño de la muestra
 sample_n = st.number_input("Tamaño de la muestra por grupo (N):", min_value=2, value=100, step=1)
 
-def compute_cld_clean(group_means, group_stds, n_sample):
+def compute_cld_smart(group_means, group_stds, n_sample):
     labels = list(group_means.keys())
     k = len(labels)
     if k <= 1:
@@ -71,17 +71,18 @@ def compute_cld_clean(group_means, group_stds, n_sample):
     letters_80 = get_letters_map(diff_80, is_upper=False)
     letters_90 = get_letters_map(diff_90, is_upper=True)
     
-    # Jerarquía: Si hay significancia al 90% (MAYÚSCULA), predomina sobre el 80%
+    # Combinación inteligente para eliminar repeticiones redundantes (ej. A a -> A)
     final_letters = {}
     for lbl in labels:
-        l_90 = letters_90[lbl]
-        l_80 = letters_80[lbl]
+        l_90 = letters_90[lbl] # MAYÚSCULAS
+        l_80 = letters_80[lbl] # minúsculas
         
-        # Si tiene asignación al 90%, mostramos la MAYÚSCULA limpia
-        if l_90:
-            final_letters[lbl] = l_90
-        else:
-            final_letters[lbl] = l_80
+        # Filtramos la minúscula si su equivalente MAYÚSCULA ya está presente
+        clean_80 = "".join([char for char in l_80 if char.upper() not in l_90])
+        
+        # Unimos las MAYÚSCULAS y las minúsculas restantes
+        combined = f"{l_90} {clean_80}".strip()
+        final_letters[lbl] = combined if combined else l_80
             
     return final_letters
 
@@ -105,7 +106,7 @@ if raw_input.strip():
                         stds[col] = float(val) * 0.08 # SD estimada
                 
                 if len(means) > 1:
-                    letters = compute_cld_clean(means, stds, sample_n)
+                    letters = compute_cld_smart(means, stds, sample_n)
                     for col in numeric_cols:
                         if col in letters:
                             output_df.at[idx, col] = f"{means[col]:.2f} {letters[col]}"
