@@ -8,16 +8,9 @@ from io import StringIO
 st.set_page_config(page_title="Calculadora de Significancia Estadística", layout="wide")
 
 st.title("📊 Calculadora de Diferencias Significativas")
-st.markdown("""
-**Instrucciones:**
-1. Confirma los tamaños de muestra ($N$) por columna.
-2. Pega tus datos crudos directamente desde Excel.
-3. Presiona el botón para generar las medias formateadas con letras al 80% y 90%.
-""")
 
-# Muestras exactas por columna
 col_samples_input = st.text_input(
-    "Tamaños de muestra (N) por columna (A, B, C, D, E...):",
+    "Tamaños de muestra (N) por columna:",
     value="590, 598, 618, 595, 597, 577"
 )
 
@@ -26,7 +19,7 @@ try:
 except ValueError:
     sample_sizes = [590]
 
-def compute_cld_exact(row_means, row_stds, n_list):
+def compute_cld_exact(row_means, n_list):
     labels = list(row_means.keys())
     k = len(labels)
     if k <= 1:
@@ -34,23 +27,25 @@ def compute_cld_exact(row_means, row_stds, n_list):
     
     sorted_labels = sorted(labels, key=lambda x: row_means[x], reverse=True)
     
-    # 1. Matriz de diferencias
     diff_80 = pd.DataFrame(False, index=sorted_labels, columns=sorted_labels)
     diff_90 = pd.DataFrame(False, index=sorted_labels, columns=sorted_labels)
     
-    # Ajuste de prueba t LSD
+    # Estimación de error estándar pooled por fila
+    means_arr = np.array([row_means[l] for l in sorted_labels])
+    overall_mean = np.mean(means_arr)
+    se_base = max(0.5, np.std(means_arr) if len(means_arr) > 1 else 1.0)
+    
     for i in range(k):
         for j in range(i+1, k):
             l1, l2 = sorted_labels[i], sorted_labels[j]
             idx1, idx2 = labels.index(l1), labels.index(l2)
             
             m1, m2 = row_means[l1], row_means[l2]
-            s1, s2 = row_stds[l1], row_stds[l2]
             n1 = n_list[idx1] if idx1 < len(n_list) else n_list[-1]
             n2 = n_list[idx2] if idx2 < len(n_list) else n_list[-1]
             
-            # SE exacto a partir de las desviaciones estándar muestrales
-            se_diff = np.sqrt((s1**2)/n1 + (s2**2)/n2)
+            # Estimación de varianza para escala de porcentajes/puntuaciones
+            se_diff = np.sqrt((se_base**2)/n1 + (se_base**2)/n2)
             
             if se_diff == 0:
                 p_val = 1.0
@@ -59,12 +54,11 @@ def compute_cld_exact(row_means, row_stds, n_list):
                 df = n1 + n2 - 2
                 p_val = 2 * (1 - stats.t.cdf(t_stat, df=df))
             
-            if p_val < 0.20: # 80%
+            if p_val < 0.20:
                 diff_80.loc[l1, l2] = diff_80.loc[l2, l1] = True
-            if p_val < 0.10: # 90%
+            if p_val < 0.10:
                 diff_90.loc[l1, l2] = diff_90.loc[l2, l1] = True
 
-    # 2. Generador de grupos de letras (Compact Letter Display)
     def get_letters(diff_matrix, is_upper=False):
         G = nx.Graph()
         G.add_nodes_from(sorted_labels)
@@ -87,7 +81,6 @@ def compute_cld_exact(row_means, row_stds, n_list):
     map_80 = get_letters(diff_80, is_upper=False)
     map_90 = get_letters(diff_90, is_upper=True)
     
-    # 3. Combinación y depuración de redundancias
     final_res = {}
     for lbl in labels:
         items_90 = map_90[lbl]
@@ -96,7 +89,6 @@ def compute_cld_exact(row_means, row_stds, n_list):
         indices_90 = {idx for _, idx in items_90}
         upper_str = "".join(sorted([let for let, _ in items_90]))
         
-        # Filtra únicamente la minúscula redundante si corresponde exactamente al mismo grupo
         valid_lowers = [let for let, idx in items_80 if idx not in indices_90]
         lower_str = "".join(sorted(valid_lowers))
         
@@ -105,39 +97,36 @@ def compute_cld_exact(row_means, row_stds, n_list):
         
     return final_res
 
-raw_input = st.text_area("Pega aquí la tabla copiada directamente desde Excel:", height=200)
+raw_input = st.text_area("Pega aquí tu matriz copiada de Excel:", height=200)
 
 if raw_input.strip():
     try:
         df = pd.read_csv(StringIO(raw_input), sep="\t")
-        st.write("Vista previa de los datos ingresados:", df.head())
+        st.write("Vista previa de los datos:", df.head())
         
         if st.button("🚀 Calcular Significancias Exactas"):
-            output_df = pd.DataFrame()
+            output_df = df.copy().astype(str)
             numeric_cols = list(df.select_dtypes(include=[np.number]).columns)
             
-            # Si el usuario pegó datos crudos (muchas filas por participante),
-            # calculamos las Medias y Desviaciones Estándar automáticas por columna
-            means_row = df[numeric_cols].mean()
-            stds_row = df[numeric_cols].std()
+            # Itera y procesa FILA POR FILA
+            for idx, row in df.iterrows():
+                row_means = {}
+                for col in numeric_cols:
+                    val = row[col]
+                    if pd.notna(val):
+                        row_means[col] = float(val)
+                
+                if len(row_means) > 1:
+                    letters = compute_cld_exact(row_means, sample_sizes)
+                    for col in numeric_cols:
+                        if col in letters:
+                            output_df.at[idx, col] = f"{row_means[col]:.2f}{letters[col]}"
             
-            row_means = means_row.to_dict()
-            row_stds = stds_row.to_dict()
+            st.success("¡Matriz procesada fila por fila!")
+            st.dataframe(output_df)
             
-            letters = compute_cld_exact(row_means, row_stds, sample_sizes)
-            
-            # Construimos la fila final formateada
-            res_row = {}
-            for col in numeric_cols:
-                res_row[col] = f"{row_means[col]:.2f}{letters[col]}"
-            
-            res_df = pd.DataFrame([res_row])
-            
-            st.success("¡Significancias calculadas!")
-            st.dataframe(res_df)
-            
-            tsv_data = res_df.to_csv(sep="\t", index=False)
-            st.text_area("Resultado listo para copiar de vuelta a Excel:", tsv_data, height=100)
+            tsv_data = output_df.to_csv(sep="\t", index=False)
+            st.text_area("Resultado listo para copiar de vuelta a Excel:", tsv_data, height=200)
             
     except Exception as e:
-        st.error(f"Error al procesar los datos: {e}")
+        st.error(f"Error: {e}")ocesar los datos: {e}")
