@@ -9,15 +9,14 @@ st.set_page_config(page_title="Matriz de Significancia Estadística", layout="wi
 
 st.title("📊 Calculadora de Diferencias Significativas")
 st.markdown("""
-**Reglas de letras:**
-* **MAYÚSCULAS (A, B...):** Grupos al **90% de confianza** ($p < 0.10$).
-* **minúsculas (a, b...):** Grupos al **80% de confianza** ($p < 0.20$).
-* *Se eliminan letras duplicadas (ej. `A a` pasa a ser simplemente `A`).*
+**Reglas de combinación:**
+* Muestra mayúsculas (90%) y minúsculas (80%) juntas cuando pertenecen a grupos distintos (ej. `A b`, `A b C d`).
+* Filtra únicamente las coincidencias idénticas directas (ej. `A a` $\rightarrow$ `A`, `B b` $\rightarrow$ `B`).
 """)
 
 sample_n = st.number_input("Tamaño de la muestra por grupo (N):", min_value=2, value=100, step=1)
 
-def compute_cld_smart(group_means, group_stds, n_sample):
+def compute_cld_exact(group_means, group_stds, n_sample):
     labels = list(group_means.keys())
     k = len(labels)
     if k <= 1:
@@ -49,7 +48,7 @@ def compute_cld_smart(group_means, group_stds, n_sample):
             if p_adj < 0.10: # 90%
                 diff_90.loc[l1, l2] = diff_90.loc[l2, l1] = True
 
-    def get_letters_map(diff_matrix, is_upper=False):
+    def get_cliques_map(diff_matrix, is_upper=False):
         G = nx.Graph()
         G.add_nodes_from(sorted_labels)
         for i in range(k):
@@ -65,24 +64,29 @@ def compute_cld_smart(group_means, group_stds, n_sample):
         for idx, clique in enumerate(cliques):
             let = alphabet[idx % len(alphabet)]
             for item in clique:
-                letter_map[item].append(let)
-        return {lbl: "".join(sorted(letter_map[lbl])) for lbl in labels}
+                letter_map[item].append((let, idx)) # Guardamos la letra y el índice del grupo
+        return letter_map
 
-    letters_80 = get_letters_map(diff_80, is_upper=False)
-    letters_90 = get_letters_map(diff_90, is_upper=True)
+    map_80 = get_cliques_map(diff_80, is_upper=False)
+    map_90 = get_cliques_map(diff_90, is_upper=True)
     
-    # Combinación inteligente para eliminar repeticiones redundantes (ej. A a -> A)
     final_letters = {}
     for lbl in labels:
-        l_90 = letters_90[lbl] # MAYÚSCULAS
-        l_80 = letters_80[lbl] # minúsculas
+        items_90 = map_90[lbl]
+        items_80 = map_80[lbl]
         
-        # Filtramos la minúscula si su equivalente MAYÚSCULA ya está presente
-        clean_80 = "".join([char for char in l_80 if char.upper() not in l_90])
+        indices_90 = {idx for _, idx in items_90}
         
-        # Unimos las MAYÚSCULAS y las minúsculas restantes
-        combined = f"{l_90} {clean_80}".strip()
-        final_letters[lbl] = combined if combined else l_80
+        # Guardamos mayúsculas
+        upper_str = "".join(sorted([let for let, _ in items_90]))
+        
+        # Conservamos la minúscula SOLO SI NO pertenece exactamente al mismo grupo (índice)
+        valid_lowers = [let for let, idx in items_80 if idx not in indices_90]
+        lower_str = "".join(sorted(valid_lowers))
+        
+        # Combinación final
+        res = f"{upper_str} {lower_str}".strip()
+        final_letters[lbl] = res if res else upper_str
             
     return final_letters
 
@@ -106,12 +110,12 @@ if raw_input.strip():
                         stds[col] = float(val) * 0.08 # SD estimada
                 
                 if len(means) > 1:
-                    letters = compute_cld_smart(means, stds, sample_n)
+                    letters = compute_cld_exact(means, stds, sample_n)
                     for col in numeric_cols:
                         if col in letters:
                             output_df.at[idx, col] = f"{means[col]:.2f} {letters[col]}"
             
-            st.success("¡Matriz procesada limpiamente!")
+            st.success("¡Matriz procesada correctamente!")
             st.dataframe(output_df)
             
             tsv_data = output_df.to_csv(sep="\t", index=False)
