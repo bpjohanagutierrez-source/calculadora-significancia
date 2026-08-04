@@ -9,20 +9,19 @@ st.set_page_config(page_title="Matriz de Significancia Estadística", layout="wi
 
 st.title("📊 Calculadora de Diferencias Significativas")
 st.markdown("""
-**Instrucciones:**
-1. Ingresa el tamaño de muestra ($N$) de tus evaluaciones.
-2. Copia tu matriz desde Excel (con encabezados de filas y columnas).
-3. Pégala en el recuadro para obtener las letras (**minúsculas al 80%** y **MAYÚSCULAS al 90%**).
+**Regla de Jerarquía:**
+* **MAYÚSCULAS (A, B...):** Diferencia significativa al **90% de confianza** ($p < 0.10$).
+* **minúsculas (a, b...):** Diferencia significativa solo al **80% de confianza** ($p < 0.20$).
 """)
 
-# Casilla para ingresar el N muestral exacto
+# Casilla para el tamaño de la muestra
 sample_n = st.number_input("Tamaño de la muestra por grupo (N):", min_value=2, value=100, step=1)
 
-def compute_cld_dual(group_means, group_stds, n_sample):
+def compute_cld_clean(group_means, group_stds, n_sample):
     labels = list(group_means.keys())
     k = len(labels)
     if k <= 1:
-        return {l: "a A" for l in labels}
+        return {l: "A" for l in labels}
     
     sorted_labels = sorted(labels, key=lambda x: group_means[x], reverse=True)
     diff_80 = pd.DataFrame(False, index=sorted_labels, columns=sorted_labels)
@@ -35,7 +34,6 @@ def compute_cld_dual(group_means, group_stds, n_sample):
             m1, m2 = group_means[l1], group_means[l2]
             s1, s2 = group_stds[l1], group_stds[l2]
             
-            # Cálculo usando el N exacto ingresado por el usuario
             se_diff = np.sqrt((s1**2)/n_sample + (s2**2)/n_sample)
             if se_diff == 0:
                 p_val = 1.0 if m1 == m2 else 0.0
@@ -46,12 +44,12 @@ def compute_cld_dual(group_means, group_stds, n_sample):
             
             p_adj = min(1.0, p_val * num_comp)
             
-            if p_adj < 0.20: # 80% Confianza (minúsculas)
+            if p_adj < 0.20: # 80%
                 diff_80.loc[l1, l2] = diff_80.loc[l2, l1] = True
-            if p_adj < 0.10: # 90% Confianza (MAYÚSCULAS)
+            if p_adj < 0.10: # 90%
                 diff_90.loc[l1, l2] = diff_90.loc[l2, l1] = True
 
-    def get_letters(diff_matrix, is_upper=False):
+    def get_letters_map(diff_matrix, is_upper=False):
         G = nx.Graph()
         G.add_nodes_from(sorted_labels)
         for i in range(k):
@@ -70,10 +68,22 @@ def compute_cld_dual(group_means, group_stds, n_sample):
                 letter_map[item].append(let)
         return {lbl: "".join(sorted(letter_map[lbl])) for lbl in labels}
 
-    letters_80 = get_letters(diff_80, is_upper=False)
-    letters_90 = get_letters(diff_90, is_upper=True)
+    letters_80 = get_letters_map(diff_80, is_upper=False)
+    letters_90 = get_letters_map(diff_90, is_upper=True)
     
-    return {lbl: f"{letters_80[lbl]} {letters_90[lbl]}" for lbl in labels}
+    # Jerarquía: Si hay significancia al 90% (MAYÚSCULA), predomina sobre el 80%
+    final_letters = {}
+    for lbl in labels:
+        l_90 = letters_90[lbl]
+        l_80 = letters_80[lbl]
+        
+        # Si tiene asignación al 90%, mostramos la MAYÚSCULA limpia
+        if l_90:
+            final_letters[lbl] = l_90
+        else:
+            final_letters[lbl] = l_80
+            
+    return final_letters
 
 raw_input = st.text_area("Pega aquí tu matriz copiada de Excel:", height=180)
 
@@ -92,15 +102,15 @@ if raw_input.strip():
                     val = row[col]
                     if pd.notna(val):
                         means[col] = float(val)
-                        stds[col] = float(val) * 0.08 # Desviación estándar estimada
+                        stds[col] = float(val) * 0.08 # SD estimada
                 
                 if len(means) > 1:
-                    letters = compute_cld_dual(means, stds, sample_n)
+                    letters = compute_cld_clean(means, stds, sample_n)
                     for col in numeric_cols:
                         if col in letters:
                             output_df.at[idx, col] = f"{means[col]:.2f} {letters[col]}"
             
-            st.success("¡Matriz procesada correctamente!")
+            st.success("¡Matriz procesada limpiamente!")
             st.dataframe(output_df)
             
             tsv_data = output_df.to_csv(sep="\t", index=False)
