@@ -2,6 +2,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
+import math
 
 st.set_page_config(page_title="Calculadora de Significancia", layout="wide")
 
@@ -11,8 +12,16 @@ st.markdown("""
 **Instrucciones:**
 1. Ingresa los tamaños de muestra ($N$) separados por comas.
 2. Pega la matriz de datos/porcentajes (los valores por columna).
-3. La aplicación calculará automáticamente las letras de significancia comparando cada columna.
+3. La aplicación calculará automáticamente las letras de significancia comparando cada columna y redondeará (.45 sube / .44 baja).
 """)
+
+# Función para redondeo personalizado
+def redondear_custom(val):
+    decimales = abs(val) - math.floor(abs(val))
+    if decimales >= 0.45:
+        return math.ceil(val) if val >= 0 else math.floor(val)
+    else:
+        return math.floor(val) if val >= 0 else math.ceil(val)
 
 # Entradas del usuario
 col1, col2 = st.columns([1, 2])
@@ -77,7 +86,7 @@ if st.button("Calcular Significancias", type="primary"):
 
         matriz = []
         for i in range(0, len(numeros), num_cols):
-            fila = numeros[i:i + numcols] if 'numcols' in locals() else numeros[i:i + num_cols]
+            fila = numeros[i:i + num_cols]
             if len(fila) == num_cols:
                 matriz.append(fila)
 
@@ -102,8 +111,9 @@ if st.button("Calcular Significancias", type="primary"):
                         letra = letras_cols[col2_idx]
                         letras_sig += calcular_significancia(val1, n1, val2, n2, letra)
                 
-                # Texto celda
-                texto = f"{val1:.2f} {letras_sig}".strip()
+                # Texto celda aplicando tu redondeo personalizado
+                val_redondeado = redondear_custom(val1)
+                texto = f"{val_redondeado}{letras_sig}".strip()
                 fila_res.append(texto)
             filas_resultado.append(fila_res)
 
@@ -117,6 +127,11 @@ if st.button("Calcular Significancias", type="primary"):
         tsv_text = "\t".join(headers) + "\n"
         for fila in filas_resultado:
             tsv_text += "\t".join(fila) + "\n"
+
+        st.text_area("Formato listo para copiar a Excel / Google Sheets (Ctrl + A -> Ctrl + C):", value=tsv_text, height=200)
+
+    except Exception as e:
+        st.error(f"Ocurrió un error al procesar los datos: {e}")
 
         st.text_area("Formato listo para copiar a Excel / Google Sheets (Ctrl + A -> Ctrl + C):", value=tsv_text, height=200)
 
