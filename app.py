@@ -10,12 +10,15 @@ st.set_page_config(page_title="Matriz de Significancia Estadística", layout="wi
 st.title("📊 Calculadora de Diferencias Significativas")
 st.markdown("""
 **Instrucciones:**
-1. Copia tu matriz desde Excel (con encabezados de filas y columnas).
-2. Pégala en el recuadro de abajo.
-3. Haz clic en calcular para obtener las letras (minúsculas al 80% y MAYÚSCULAS al 90%).
+1. Ingresa el tamaño de muestra ($N$) de tus evaluaciones.
+2. Copia tu matriz desde Excel (con encabezados de filas y columnas).
+3. Pégala en el recuadro para obtener las letras (**minúsculas al 80%** y **MAYÚSCULAS al 90%**).
 """)
 
-def compute_cld_dual(group_means, group_stds, group_ns):
+# Casilla para ingresar el N muestral exacto
+sample_n = st.number_input("Tamaño de la muestra por grupo (N):", min_value=2, value=100, step=1)
+
+def compute_cld_dual(group_means, group_stds, n_sample):
     labels = list(group_means.keys())
     k = len(labels)
     if k <= 1:
@@ -31,14 +34,14 @@ def compute_cld_dual(group_means, group_stds, group_ns):
             l1, l2 = sorted_labels[i], sorted_labels[j]
             m1, m2 = group_means[l1], group_means[l2]
             s1, s2 = group_stds[l1], group_stds[l2]
-            n1, n2 = group_ns[l1], group_ns[l2]
             
-            se_diff = np.sqrt((s1**2)/n1 + (s2**2)/n2)
+            # Cálculo usando el N exacto ingresado por el usuario
+            se_diff = np.sqrt((s1**2)/n_sample + (s2**2)/n_sample)
             if se_diff == 0:
                 p_val = 1.0 if m1 == m2 else 0.0
             else:
                 t_stat = abs(m1 - m2) / se_diff
-                df = n1 + n2 - 2
+                df = (2 * n_sample) - 2
                 p_val = 2 * (1 - stats.t.cdf(t_stat, df=df))
             
             p_adj = min(1.0, p_val * num_comp)
@@ -84,16 +87,15 @@ if raw_input.strip():
             numeric_cols = df.select_dtypes(include=[np.number]).columns
             
             for idx, row in df.iterrows():
-                means, stds, ns = {}, {}, {}
+                means, stds = {}, {}
                 for col in numeric_cols:
                     val = row[col]
                     if pd.notna(val):
                         means[col] = float(val)
                         stds[col] = float(val) * 0.08 # Desviación estándar estimada
-                        ns[col] = 30                 # Muestra estimada
                 
                 if len(means) > 1:
-                    letters = compute_cld_dual(means, stds, ns)
+                    letters = compute_cld_dual(means, stds, sample_n)
                     for col in numeric_cols:
                         if col in letters:
                             output_df.at[idx, col] = f"{means[col]:.2f} {letters[col]}"
